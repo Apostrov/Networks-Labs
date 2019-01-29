@@ -70,7 +70,8 @@ int empty()
 void display()
 {
     Node* curNode = root;
-    while(curNode->nextNode != NULL){
+    while(curNode->nextNode != NULL)
+    {
         printf("%d\n", curNode->data);
         curNode = curNode->nextNode;
     }
@@ -79,7 +80,8 @@ void display()
 
 void create()
 {
-    while(size > 0){
+    while(size > 0)
+    {
         pop();
     }
 }
