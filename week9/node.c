@@ -1,5 +1,5 @@
 /**
- * It remains to deal with the threads (and refactor and maybe test it) 
+ * It remains to deal with the req_ask(), threads (and refactor and maybe test it) 
  * and everything will work, I hope
  * But not enough time =(
 */
@@ -21,7 +21,7 @@
 #define NODE_NAME "N1"
 #define FILES_COUNT 300
 
-#define PORT 2001
+#define PORT 2000
 
 #define IP_ADDRESS "127.0.0.1"
 
@@ -40,7 +40,7 @@ void* sync_send(void* args)
     const char *key;
     map_iter_t iter = map_iter(&db);
 
-    const char delimiter = ":";
+    const char delimiter[2] = ":";
     char *token;
     
     while(1){
@@ -52,16 +52,18 @@ void* sync_send(void* args)
         }
 
         // PARSE ADDRESS
-        char *addres = map_get(&db, key);
-        token = strtok(addres, delimiter);
-        char addres_parsed[3];
-        for(int i = 0; i < 3 && token != NULL; i++)
+        char *addres = *map_get(&db, key);
+        char *addres_strok = malloc(sizeof(addres));
+        strcpy(addres_strok, addres);
+        token = strtok(addres_strok, delimiter);
+        char *addres_parsed[3];
+        for(int i = 0; i < 2 && token != NULL; i++)
         {
             addres_parsed[i] = token;
             token = strtok(NULL, delimiter);
         }
         // _____________
-
+        printf("%s -> Address to connect %s:%s\n", name, addres_parsed[0], addres_parsed[1]);
         int sockfd = 0, 
             sent_recv_bytes = 0;
 
@@ -86,7 +88,7 @@ void* sync_send(void* args)
 
         printf("%s -> Send flag\n", name);
         printf("%s -> No of bytes sent = %d\n", name, sent_recv_bytes);
-
+        sleep(1); // because sometimes he sends the flag later
         char port[10];
         sprintf(port, "%d", PORT); 
         char msg[1024];
@@ -114,19 +116,20 @@ void* sync_send(void* args)
         printf("%s -> %s\n", name, msg);
         printf("%s -> No of bytes sent = %d\n", name, sent_recv_bytes);
         //______________________
-
+        
+        free(addres_strok);
         shutdown(sockfd, SHUT_RD);
         close(sockfd);
     }
 }
 
-void *sync_parse(void *fd)
+void *sync_parse(void *args)
 {
     char name[] = "Sync parser";
     printf("%s -> Alive!\n", name);
 
-    int comm_socket_fd = *(int *) fd;
-    free(fd);
+    int comm_socket_fd = *(int *) args;
+    free(args);
 
     if (comm_socket_fd < 0) 
     {
@@ -171,12 +174,12 @@ void *req_ask()
     printf("%s -> Alive!\n", name);
 }
 
-void *req_answer(void *fd)
+void *req_answer(void *args)
 {
     char name[] = "Request answerer";
     printf("%s -> Alive!\n", name);
-    int comm_socket_fd = *(int *) fd;
-    free(fd);
+    int comm_socket_fd = *(int *) args;
+    free(args);
 
     if (comm_socket_fd < 0) 
     {
@@ -360,7 +363,7 @@ void* get_flag(void* args)
 int main(int argc, char **argv)
 {
     map_init(&db);
-    map_set(&db, "Hardcoded", "127.0.0.1:2000");
+    map_set(&db, "Hardcoded", "127.0.0.1:2001");
 
     strcpy(files[0], "file.txt");
     strcpy(files[1], "playbook.txt");
@@ -372,6 +375,8 @@ int main(int argc, char **argv)
     
     pthread_create(&server, NULL, get_flag, NULL);
     pthread_join(server, NULL);
+
+    
     
     return 0;
 }
