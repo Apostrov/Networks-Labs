@@ -67,11 +67,22 @@ void* sync_send(void* args)
     strcat(msg, port);
     strcat(msg, ":");
 
+    for(int i = 0;i < FILES_COUNT;i++)
+    {
+        strcat(msg, files[i]);
+        if(i + 1 == FILES_COUNT || strcmp(files[i + 1], "NULL") == 0)
+        {
+            break;
+        }
+        strcat(msg, ",");
+    }
+
     sent_recv_bytes = send(sockfd, &msg, sizeof(msg), 0);
     
     printf("%s -> Send info about me\n", name);
     printf("%s -> %s\n", name, msg);
     printf("%s -> No of bytes sent = %d\n", name, sent_recv_bytes);
+
 
     shutdown(sockfd, SHUT_RD);
     close(sockfd);
@@ -243,7 +254,8 @@ int main(int argc, char **argv)
 {
     map_init(&hash_map);
     strcpy(files[0], "file.txt");
-
+    strcpy(files[1], "playbook.txt");
+    strcpy(files[2], "NULL"); // crutch
     pthread_t client, server;
 
     
