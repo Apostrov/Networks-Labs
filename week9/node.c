@@ -14,6 +14,7 @@
 #include "map.h"
 
 #define NODE_NAME "N1"
+#define FILES_COUNT 300
 
 #define PORT 2001
 #define CONN_PORT 2000
@@ -25,6 +26,8 @@
 #define REQUEST 0
 
 char data_buffer[1024];
+map_str_t hash_map;
+char files[FILES_COUNT][25];  
 
 void* sync_send(void* args) 
 {
@@ -53,7 +56,7 @@ void* sync_send(void* args)
 
     printf("%s -> Send flag\n", name);
     printf("%s -> No of bytes sent = %d\n", name, sent_recv_bytes);
-    sleep(1);
+    
     char msg[1024];
     char port[10];
     sprintf(port, "%d", PORT); 
@@ -95,7 +98,25 @@ void *sync_parse(void *fd)
 
     char *client_data = (char *) data_buffer;
     printf("%s -> Get info: %s\n", name, client_data);
+    
+    char node_name[25];
+    memset(node_name, 0, sizeof(node_name));
+    int first_delim_index = 0;
+    for(int i = 0; i < strlen(client_data); i++)
+    {
+        if(client_data[i] == ':') 
+        {
+            first_delim_index = i;
+            break;
+        }
+    }
+    strncpy(node_name, client_data, first_delim_index);
+    node_name[first_delim_index] = '\0';
 
+    char address[30];
+    strcpy(address, client_data + first_delim_index + 1);
+    
+    map_set(&hash_map, node_name, address);
 }
 
 void *req_ask()
@@ -129,7 +150,7 @@ void* get_flag(void* args)
         printf("%s -> socket creation failed\n", name);
         pthread_exit(0);
     }
-    
+
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = PORT;
     server_addr.sin_addr.s_addr = INADDR_ANY; 
@@ -220,13 +241,18 @@ void* get_flag(void* args)
 
 int main(int argc, char **argv)
 {
+    map_init(&hash_map);
+    strcpy(files[0], "file.txt");
+
     pthread_t client, server;
 
+    
+
     pthread_create(&client, NULL, sync_send, NULL);
-    int res = pthread_join(client, NULL);
-    printf("%d\n", res);
+    pthread_join(client, NULL);
+    
     pthread_create(&server, NULL, get_flag, NULL);
     pthread_join(server, NULL);
-    printf("WTF?");
+    
     return 0;
 }
