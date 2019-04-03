@@ -1,7 +1,5 @@
 /**
- * It remains to deal with the req_ask(), threads (and refactor and maybe test it) 
- * and everything will work, I hope
- * But not enough time =(
+ * There is no REQUEST command, sorry =(
 */
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,10 +26,25 @@
 #define SYN 1
 #define REQUEST 0
 
+#define MAX_ATTENDANCE 5
+
 char data_buffer[1024];
-map_str_t db;
+map_str_t kdb;
+map_int_t cdb;
+map_int_t bldb;
 char files[FILES_COUNT][25];
 int peer_count;
+
+pthread_mutex_t lock_kdb, lock_cdb, lock_bldb;
+
+// take impementation from stackoverflow
+static size_t getHash(const char* cp)
+{
+    size_t hash = 0;
+    while (*cp)
+        hash = (hash * 10) + *cp++ - '0';
+    return hash;
+}
 
 void* sync_send(void* args) 
 {
@@ -39,21 +52,22 @@ void* sync_send(void* args)
     printf("%s -> Alive!\n", name);
 
     const char *key;
-    map_iter_t iter = map_iter(&db);
+    map_iter_t iter = map_iter(&kdb);
 
     const char delimiter[2] = ":";
     char *token;
     
     while(1){
-        key = map_next(&db, &iter);
+        sleep(5);
+        key = map_next(&kdb, &iter);
         if(key == NULL)
         {
-            iter = map_iter(&db);
+            iter = map_iter(&kdb);
             continue;
         }
 
         // PARSE ADDRESS
-        char *address = *map_get(&db, key);
+        char *address = *map_get(&kdb, key);
         char *address_strok = malloc(sizeof(address));
         strcpy(address_strok, address);
         token = strtok(address_strok, delimiter);
@@ -128,12 +142,12 @@ void* sync_send(void* args)
         sleep(1); // because sometimes he sends the peers later
 
         const char *key_temp;
-        map_iter_t iter_temp = map_iter(&db);
+        map_iter_t iter_temp = map_iter(&kdb);
 
         for(int i = 0; i < send_peers_count; i++)
         {
-            key_temp = map_next(&db, &iter_temp);
-            char *address_to_send = *map_get(&db, key_temp);
+            key_temp = map_next(&kdb, &iter_temp);
+            char *address_to_send = *map_get(&kdb, key_temp);
             sent_recv_bytes = send(sockfd, &address_to_send, sizeof(address_to_send), 0);
 
             printf("%s -> Send peer %s \n", name, key_temp);
@@ -172,6 +186,34 @@ void *sync_parse(void *args)
 
     char *client_data = (char *) data_buffer;
     printf("%s -> Get info: %s\n", name, client_data);
+
+    // HASH CHECK
+    size_t hash = getHash(client_data);
+    if(map_get(&bldb, hash) != NULL)
+    {
+        printf("%s -> Current client in black list %s\n", name);
+        pthread_exit(0);
+    }
+
+    int *attendance = *map_get(&cdb, hash);
+    if(attendance > MAX_ATTENDANCE)
+    {
+        printf("%s -> Add current client to black list %s\n", name);
+        pthread_mutex_lock(&lock_bldb);
+        map_set(&bldb, hash, 1);
+        pthread_mutex_unlock(&lock_bldb);
+        
+        pthread_mutex_lock(&lock_cdb);
+        map_remove(&cdb, hash);
+        pthread_mutex_unlock(&lock_cdb);
+
+        pthread_exit(0);
+    }
+    pthread_mutex_lock(&lock_cdb);
+    attendance++;
+    map_set(&cdb, hash, attendance);
+    pthread_mutex_unlock(&lock_cdb);
+    //___________
     
     char node_name[25];
     memset(node_name, 0, sizeof(node_name));
@@ -189,9 +231,11 @@ void *sync_parse(void *args)
 
     char address[30];
     strcpy(address, client_data + first_delim_index + 1);
-    if (map_get(&db, node_name) == NULL) 
+    if (map_get(&kdb, node_name) == NULL) 
     {
-        map_set(&db, node_name, address);
+        pthread_mutex_lock(&lock_kdb);
+        map_set(&kdb, node_name, address);
+        pthread_mutex_unlock(&lock_kdb);
         peer_count++;
     }
     
@@ -227,12 +271,20 @@ void *sync_parse(void *args)
 
         char address[30];
         strcpy(address, client_data + first_delim_index + 1);
-        if (map_get(&db, node_name) == NULL) 
+        if (map_get(&kdb, node_name) == NULL) 
         {
-            map_set(&db, node_name, address);
+            pthread_mutex_lock(&lock_kdb);
+            map_set(&kdb, node_name, address);
+            pthread_mutex_unlock(&lock_kdb);
             peer_count++;
         }
     }
+
+    pthread_mutex_lock(&lock_cdb);
+    *attendance = *map_get(&cdb, hash);
+    attendance--;
+    map_set(&cdb, hash, attendance);
+    pthread_mutex_unlock(&lock_cdb);
 
     pthread_exit(0);
 }
@@ -434,21 +486,25 @@ void* get_flag(void* args)
 
 int main(int argc, char **argv)
 {
-    map_init(&db);
-    map_set(&db, "Hardcoded", "10.240.16.61:2076");
+    pthread_mutex_init(&lock_kdb, NULL);
+    pthread_mutex_init(&lock_cdb, NULL);
+    pthread_mutex_init(&lock_bldb, NULL);
 
-    peer_count = 1;
+    map_init(&kdb);
+    map_init(&cdb);
+    map_init(&bldb);
+    //map_set(&kdb, "Hardcoded", "10.240.16.61:2076");
+
+    peer_count = 0;
 
     strcpy(files[0], "file.txt");
     strcpy(files[2], "NULL"); // crutch
     pthread_t client, server;
-
-    pthread_create(&server, NULL, get_flag, NULL);
-    pthread_join(server, NULL);
-
-
+    
     pthread_create(&client, NULL, sync_send, NULL);
+    pthread_create(&server, NULL, get_flag, NULL);
     pthread_join(client, NULL);
+    pthread_join(server, NULL);
     
     
     
