@@ -26,7 +26,7 @@
 #define SYN 1
 #define REQUEST 0
 
-#define MAX_ATTENDANCE 5
+#define MAX_ATTENDANCE 2
 
 char data_buffer[1024];
 map_str_t kdb;
@@ -37,13 +37,18 @@ int peer_count;
 
 pthread_mutex_t lock_kdb, lock_cdb, lock_bldb;
 
-// take impementation from stackoverflow
-static size_t getHash(const char* cp)
-{
-    size_t hash = 0;
-    while (*cp)
-        hash = (hash * 10) + *cp++ - '0';
-    return hash;
+struct args {
+    int comm_socket_fd;
+    char *hash;
+};
+
+// take impementation from hash map
+static unsigned map_hash(const char *str) {
+  unsigned hash = 5381;
+  while (*str) {
+    hash = ((hash << 5) + hash) ^ *str++;
+  }
+  return hash;
 }
 
 void* sync_send(void* args) 
@@ -94,9 +99,7 @@ void* sync_send(void* args)
         dest.sin_addr = *((struct in_addr *)host->h_addr);
 
         sockfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        perror("Hello!");
         connect(sockfd, (struct sockaddr *)&dest,sizeof(struct sockaddr));
-        perror("How are you!");
         // SEND INFO
         int flag = SYN;
 
@@ -167,7 +170,8 @@ void *sync_parse(void *args)
     char name[] = "Sync parser";
     printf("%s -> Alive!\n", name);
 
-    int comm_socket_fd = *(int *) args;
+    int comm_socket_fd = ((struct args *)args)->comm_socket_fd;
+    char *hash = ((struct args *)args)->hash;
     free(args);
 
     if (comm_socket_fd < 0) 
@@ -187,18 +191,16 @@ void *sync_parse(void *args)
     char *client_data = (char *) data_buffer;
     printf("%s -> Get info: %s\n", name, client_data);
 
-    // HASH CHECK
-    size_t hash = getHash(client_data);
-    if(map_get(&bldb, hash) != NULL)
+    // ATTENDANCE CHECK
+    int *att = map_get(&cdb, hash);
+    int attendance = 0;
+    if(att != NULL)
     {
-        printf("%s -> Current client in black list %s\n", name);
-        pthread_exit(0);
+        attendance = *att;
     }
-
-    int *attendance = *map_get(&cdb, hash);
     if(attendance > MAX_ATTENDANCE)
     {
-        printf("%s -> Add current client to black list %s\n", name);
+        printf("%s -> Add current client to black list\n", name);
         pthread_mutex_lock(&lock_bldb);
         map_set(&bldb, hash, 1);
         pthread_mutex_unlock(&lock_bldb);
@@ -281,11 +283,12 @@ void *sync_parse(void *args)
     }
 
     pthread_mutex_lock(&lock_cdb);
-    *attendance = *map_get(&cdb, hash);
+    att = map_get(&cdb, hash);
+    attendance = *att;
     attendance--;
     map_set(&cdb, hash, attendance);
     pthread_mutex_unlock(&lock_cdb);
-
+    free(hash);
     pthread_exit(0);
 }
 
@@ -465,17 +468,29 @@ void* get_flag(void* args)
             int *client_data = (int *) data_buffer;
             printf("%s -> Get flag: %d\n", name, *client_data);
 
-            int *newsock = malloc(sizeof(int));
-            *newsock = comm_socket_fd;
+            // HASH CHECK
+            size_t hash_int = map_hash(inet_ntoa(client_addr.sin_addr));
+            char *hash = malloc(256);
+            snprintf(hash, sizeof(hash), "%zu", hash_int);
+            if(map_get(&bldb, hash) != NULL)
+            {
+                printf("%s -> Current client in black list\n", name);
+                pthread_exit(0);
+            }
+            //_______________
+
+            struct args *arguments = (struct args *)malloc(sizeof(struct args));
+            arguments->comm_socket_fd = comm_socket_fd;
+            arguments->hash = hash;
 
             if(*client_data == REQUEST) 
             {
-                pthread_create(&req, NULL, req_answer, newsock);
+                pthread_create(&req, NULL, req_answer, arguments);
                 
             } 
             else if(*client_data == SYN)
             {
-                pthread_create(&syn, NULL, sync_parse, newsock);
+                pthread_create(&syn, NULL, sync_parse, arguments);
                 
             }
         }
